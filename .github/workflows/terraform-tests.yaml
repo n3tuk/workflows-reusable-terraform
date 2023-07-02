@@ -6,7 +6,7 @@ on:
     inputs:
       # workflow-branch is used to choose the correct workflow repository branch
       workflow-branch:
-        default: master
+        default: main
         type: string
         required: false
       # enable-aws will allow the configure-aws-credentials GitHub Action to run
