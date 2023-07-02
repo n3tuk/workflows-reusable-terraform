@@ -189,7 +189,7 @@ jobs:
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
       - name: Run Snyk against the ${{ inputs.type }}
-        uses: snyk/actions/iac@806182742461562b67788a64410098c9d9b96adb
+        uses: snyk/actions/iac@87b58602664ec2c1c4fd286e2dcf71f2c5a331d6
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
