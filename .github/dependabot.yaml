@@ -1,0 +1,22 @@
+---
+version: 2
+
+updates:
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: thursday
+      time: "18:30"
+      timezone: "Europe/London"
+    reviewers:
+      - depop/platform
+    commit-message:
+      prefix: actions
+      include: scope
+    labels:
+      - type/dependencies
+      - update/github-workflows
+      - release/chore
+      - priority/normal

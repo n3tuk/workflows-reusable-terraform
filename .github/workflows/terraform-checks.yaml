@@ -1,0 +1,207 @@
+---
+name: Terraform Checks
+
+on:
+  workflow_call:
+    inputs:
+      # workflow-branch is used to choose the correct workflow repository branch
+      workflow-branch:
+        default: main
+        type: string
+        required: false
+      # name defines the name of the GitHub Workflow Job to make it easier in
+      # the User Interface to see which Check relates to which aspect of the
+      # Module (as by default all 3+ checks are called the same thing otherwise)
+      name:
+        type: string
+        required: true
+      # type defines the "type" of Terraform code being tested - configuration,
+      # example, module, or submodule
+      type:
+        type: string
+        required: true
+      # working-directory is the location of the configuration, example, module,
+      # or submodule, being checked
+      working-directory:
+        type: string
+        required: true
+
+defaults:
+  run:
+    # Error handling and pipefile must be explicitly set via the default shell
+    #   https://github.com/actions/runner/issues/353#issuecomment-1067227665
+    shell: bash --noprofile --norc -eo pipefail {0}
+
+jobs:
+  terraform-checks:
+    name: Check ${{ inputs.name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Checkout the workflows-reusable-terraform repository
+        uses: actions/checkout@v3
+        with:
+          repository: n3tuk/workflows-reusable-terraform
+          # Checkout this repository outside of the local repository being
+          # processed so it will not show up as a change or addition to the
+          # repository in local checks (e.g. when running terraform-docs)
+          path: ${{ github.workspace }}/workflows-reusable-terraform
+          ref: ${{ inputs.workflow-branch }}
+          token: ${{ secrets.WORKFLOWS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Move the workflows-reusable-terraform repository
+        # The above checkout action cannot checkout a repository outside of the
+        # workspace, so this step runs to move it manually outside of the
+        # repository instead:
+        #   https://github.com/actions/checkout/issues/197
+        run: mv workflows-reusable-terraform ..
+
+      - name: Read the current Terraform version
+        uses: actions/github-script@v6
+        id: version
+        with:
+          script: >
+            require('${{ github.workspace }}/../workflows-reusable-terraform/scripts/terraform-version.js')({
+              core: core,
+              src: '${{ github.workspace }}'
+            })
+
+      - name: Prepare the cache directories
+        run: |
+          echo 'plugin_cache_dir="$HOME/.terraform.d/plugin-cache"' > ~/.terraformrc
+          mkdir -p $HOME/.terraform.d/plugin-cache
+          mkdir -p $HOME/.tflint.d/plugins
+
+      - name: Cache the Terraform providers
+        uses: actions/cache@v3
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-${{ runner.os }}-${{ hashFiles('**/terraform.tf') }}
+
+      - name: Setup the Terraform environment with v${{ steps.version.outputs.version }}
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ steps.version.outputs.version }}
+          terraform_wrapper: false
+
+      - name: Initilise Terraform
+        # Terraform Modules cannot be initialised when they do not have full
+        # Provider configurations, so only run fmt and static code analysis
+        #   https://github.com/antonbabenko/pre-commit-terraform#terraform_validate
+        if: inputs.type == 'configuration' || inputs.type == 'example'
+        id: init
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TFE_TOKEN }}
+        run: terraform init -backend=false -no-color 2>&1 | tee /tmp/terraform.init.log
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+
+      - name: Report on the Terraform initilisation
+        if: inputs.type == 'configuration' || inputs.type == 'example'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: >
+            require('${{ github.workspace }}/../workflows-reusable-terraform/scripts/terraform-report-init.js')({
+              github: github,
+              context: context,
+              core: core,
+              inputs: {
+                type: '${{ inputs.type }}',
+                name: '${{ inputs.name }}',
+                init: '${{ steps.init.outcome }}'
+              }
+            })
+
+      - name: fmt Check the Terraform ${{ inputs.type }}
+        id: fmt
+        run: terraform fmt -check -diff -no-color 2>&1 | tee /tmp/terraform.fmt.log
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+
+      - name: Validate the Terraform ${{ inputs.type}}
+        # Terraform Modules cannot be validated when they do not have full
+        # Provider configurations (and they cannot be initialised)
+        #   https://github.com/antonbabenko/pre-commit-terraform#terraform_validate
+        if: inputs.type == 'configuration' || inputs.type == 'example'
+        id: validate
+        run: terraform validate -no-color 2>&1 | tee /tmp/terraform.validate.log
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+
+      - name: Report on Terraform fmt and validation outcome
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: >
+            require('${{ github.workspace }}/../workflows-reusable-terraform/scripts/terraform-report-validate.js')({
+              github: github,
+              context: context,
+              core: core,
+              inputs: {
+                type: '${{ inputs.type }}',
+                name: '${{ inputs.name }}',
+                validate: '${{ steps.validate.outcome }}',
+                fmt: '${{ steps.fmt.outcome }}'
+              }
+            })
+
+      - name: Cache the tflint plugins directory
+        uses: actions/cache@v3
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-${{ runner.os }}-${{ hashFiles('.tflint.hcl') }}
+          restore-keys: tflint-${{ runner.os }}-
+
+      - name: Set up the tflint environment
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: latest
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Initilise tflint
+        env:
+          # Set this to bypass the rate limit of 60 requests per hour
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tflint --init \
+            --config=${{ github.workspace }}/.tflint.hcl
+
+      - name: Run tflint against the ${{ inputs.type }}
+        run: |
+          tflint --format compact \
+            --config=${{ github.workspace }}/.tflint.hcl
+        working-directory: ${{ inputs.working-directory }}
+
+      - name: Run terraform-docs against the ${{ inputs.type }}
+        uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: ${{ inputs.working-directory }}
+          # This needs to point to the location inside the container, not inside
+          # the repository, or on the agent
+          config-file: /github/workspace/.terraform-docs.yaml
+          git-push: true
+          git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
+
+      - name: Run Snyk against the ${{ inputs.type }}
+        uses: snyk/actions/iac@806182742461562b67788a64410098c9d9b96adb
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+          sarif: false
+          file: ${{ inputs.working-directory }}
+          args: >-
+            --detection-depth=1
+            --org="n3tuk"
+            --project-environment="internal"
+            --project-lifecycle="development"
+            --target-name="${{ github.repository }}"
+            --target-reference="pr/${{ github.ref_name }}"
+            --policy-path="/github/workspace/.snyk"
+            --report

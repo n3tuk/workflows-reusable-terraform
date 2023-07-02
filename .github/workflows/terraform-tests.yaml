@@ -1,0 +1,183 @@
+---
+name: Terraform Tests
+
+on:
+  workflow_call:
+    inputs:
+      # workflow-branch is used to choose the correct workflow repository branch
+      workflow-branch:
+        default: master
+        type: string
+        required: false
+      # enable-aws will allow the configure-aws-credentials GitHub Action to run
+      # which will fetch and provide the AWS credentials needed to run TerraTest
+      enable-aws:
+        default: false
+        type: boolean
+        required: false
+      # aws-iam-role is the ARN of the AWS IAM Role which should be used to
+      # provide access into the Terratest Shared Sandbox, with the general Role
+      # set by default (override if you require a specific IAM Role for access)
+      aws-iam-role-arn:
+        default: "arn:aws:iam::225076430690:role/github-actions/terratest-general"
+        type: string
+        required: false
+
+defaults:
+  run:
+    # Error handling and pipefile must be explicitly set via the default shell
+    #   https://github.com/actions/runner/issues/353#issuecomment-1067227665
+    shell: bash --noprofile --norc -eo pipefail {0}
+
+jobs:
+  terratest:
+    name: TerraTest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v3
+
+      - name: Checkout the workflows-reusable-terraform repository
+        uses: actions/checkout@v3
+        with:
+          repository: n3tuk/workflows-reusable-terraform
+          # Checkout this repository outside of the local repository being
+          # processed so it will not show up as a change or addition to the
+          # repository in local checks (e.g. when running terraform-docs)
+          path: ${{ github.workspace }}/workflows-reusable-terraform
+          ref: ${{ inputs.workflow-branch }}
+          token: ${{ secrets.WORKFLOWS_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Move the workflows-reusable-terraform repository
+        # The above checkout action cannot checkout a repository outside of the
+        # workspace, so this step runs to move it manually outside of the
+        # repository instead:
+        #   https://github.com/actions/checkout/issues/197
+        run: mv workflows-reusable-terraform ..
+
+      - name: Read the current Terraform version
+        uses: actions/github-script@v6
+        id: version
+        with:
+          script: >
+            require('${{ github.workspace }}/../workflows-reusable-terraform/scripts/terraform-version.js')({
+              core: core,
+              src: '${{ github.workspace }}'
+            })
+
+      - name: Prepare the cache directories
+        run: |
+          echo 'plugin_cache_dir="$HOME/.terraform.d/plugin-cache"' > ~/.terraformrc
+          mkdir -p $HOME/.terraform.d/plugin-cache
+
+      - name: Cache the Terraform providers
+        uses: actions/cache@v3
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-${{ runner.os }}-${{ hashFiles('**/terraform.tf') }}
+          restore-keys: terraform-${{ runner.os }}-
+
+      - name: Setup the Terraform environment with v${{ steps.version.outputs.version }}
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ steps.version.outputs.version }}
+          terraform_wrapper: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up TerraTest environment
+        working-directory: tests
+        run: go mod download
+
+      - name: Install terratest_log_parser
+        working-directory: tests
+        run: go install github.com/gruntwork-io/terratest/cmd/terratest_log_parser@6264798b7b560834b4ce139f05176808f231cd20
+
+      - name: Set up the TerraTest logging locations
+        id: logs
+        run: |
+          mkdir -p logs
+          LOG_FILE=$(mktemp --tmpdir=logs XXX-terratest.log)
+          echo "file=${LOG_FILE}" >> $GITHUB_OUTPUT
+          LOG_DIR=$(mktemp --directory --tmpdir=logs XXX-terratest-results)
+          echo "dir=${LOG_DIR}" >> $GITHUB_OUTPUT
+
+      # Setup AWS credentials if required
+      - name: Configure AWS credentials for TerraTest
+        if: ${{ inputs.enable-aws }}
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: "${{ inputs.aws-iam-role-arn }}"
+          role-session-name: terratest
+          aws-region: eu-west-2
+        # This can, for unknown reasons, hang in requesting the credentials
+        # forcing it to run for the full (default) 360 minutes. If we do not
+        # retrieve credentials within five minutes, cancel the job and abort
+        timeout-minutes: 5
+
+      - name: Run TerraTest
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TFE_TOKEN }}
+        working-directory: tests
+        run: |
+          go test -v -timeout 60m -count 1 \
+            | tee >(
+                # Strip ANSI colours before sending to the log file
+                sed 's/\x1b\[[0-9;]*m//g' \
+                  > ../${{ steps.logs.outputs.file }}
+              )
+
+      - name: Parse the TerraTest logs
+        if: always()
+        run: |
+          terratest_log_parser \
+            -log-level warning \
+            -testlog ${{ steps.logs.outputs.file }} \
+            -outputdir ${{ steps.logs.outputs.dir }}
+
+      - name: Publish the TerraTest summary
+        id: junit-summary
+        uses: phoenix-actions/test-reporting@v12
+        if: always()
+        with:
+          name: TerraTest Summary
+          output-to: step-summary
+          working-directory: ${{ steps.logs.outputs.dir }}
+          path: report.xml
+          reporter: java-junit
+
+      - name: Publish the TerraTest results
+        id: junit-report
+        uses: phoenix-actions/test-reporting@v12
+        if: always()
+        with:
+          name: Terraform CI / Testing / TerraTest Results
+          output-to: checks
+          working-directory: ${{ steps.logs.outputs.dir }}
+          path: report.xml
+          reporter: java-junit
+
+      - name: Add link for TerraTest results
+        if: always()
+        run: |
+          echo "::notice::TerraTest Report is available at ${{ steps.junit-report.outputs.runHtmlUrl }}"
+          echo "See the full TerraTest Results Report at [GitHub Actions / Terraform CI / Testing / TerraTest Results](${{ steps.junit-report.outputs.runHtmlUrl }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Save the TerraTest logs and reports as an artifact
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: TerraTest Logs and Reports
+          path: ${{ steps.logs.outputs.dir }}
+
+      - name: Save the Terraform states as an artifact
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: Terraform State Files
+          path: examples/*/terraform.tfstate*
