@@ -25,7 +25,7 @@ including:
 - `tflint` to perform linting against the Terraform configuration and/or module;
 - `terraform-docs` to check the `README.md` is up-to-date with the current
   configuration and/or module;
-- `snyk` to perform static and security analysis of the configuration and/or
+- `tfsec` to perform static and security analysis of the configuration and/or
   module;
 
 #### Workflow Parameters for `terraform-checks`

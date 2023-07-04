@@ -188,20 +188,16 @@ jobs:
           git-push: true
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
-      - name: Run Snyk against the ${{ inputs.type }}
-        uses: snyk/actions/iac@87b58602664ec2c1c4fd286e2dcf71f2c5a331d6
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      - name: Run tfsec against the ${{ inputs.type }}
+        uses: aquasecurity/tfsec-action@v0.1.4
         with:
-          command: test
-          sarif: false
-          file: ${{ inputs.working-directory }}
-          args: >-
-            --detection-depth=1
-            --org="n3tuk"
-            --project-environment="internal"
-            --project-lifecycle="development"
-            --target-name="${{ github.repository }}"
-            --target-reference="pr/${{ github.ref_name }}"
-            --policy-path="/github/workspace/.snyk"
-            --report
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          working_directory: ${{ inputs.working-directory }}
+          format: lovely,sarif
+          additional_args: --out=tfsec
+
+      - name: Upload the tfsec SARIF file for the ${{ inputs.type }}
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: ${{ inputs.working-directory }}/tfsec.sarif.json
+          category: tfsec-${{ inputs.type }}
