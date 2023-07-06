@@ -189,7 +189,7 @@ jobs:
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
       - name: Run tfsec against the ${{ inputs.type }}
-        uses: aquasecurity/tfsec-action@v0.1.4
+        uses: aquasecurity/tfsec-action@v1.0.3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           working_directory: ${{ inputs.working-directory }}
