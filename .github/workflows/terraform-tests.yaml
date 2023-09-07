@@ -35,10 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Checkout the workflows-reusable-terraform repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: n3tuk/workflows-reusable-terraform
           # Checkout this repository outside of the local repository being
