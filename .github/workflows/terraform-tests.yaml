@@ -110,7 +110,7 @@ jobs:
       # Setup AWS credentials if required
       - name: Configure AWS credentials for TerraTest
         if: ${{ inputs.enable-aws }}
-        uses: aws-actions/configure-aws-credentials@v3
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: "${{ inputs.aws-iam-role-arn }}"
           role-session-name: terratest
