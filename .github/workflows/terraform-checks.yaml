@@ -189,7 +189,7 @@ jobs:
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
       - name: Run trivy against the ${{ inputs.type }}
-        uses: aquasecurity/trivy-action@v0.14.0
+        uses: aquasecurity/trivy-action@master
         with:
           github-pat: ${{ secrets.GITHUB_TOKEN }}
           trivy-config: .trivy.yaml
