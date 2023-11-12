@@ -188,16 +188,18 @@ jobs:
           git-push: true
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
-      - name: Run tfsec against the ${{ inputs.type }}
-        uses: aquasecurity/tfsec-action@v1.0.3
+      - name: Run trivy against the ${{ inputs.type }}
+        uses: aquasecurity/trivy-action@v0.14
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          working_directory: ${{ inputs.working-directory }}
-          format: lovely,sarif
-          additional_args: --out=tfsec
+          github-pat: ${{ secrets.GITHUB_TOKEN }}
+          trivy-config: .trivy.yaml
+          scan-type: fs
+          scan-ref: ${{ inputs.working-directory }}
+          format: sarif
+          output: trivy-results.sarif
 
-      - name: Upload the tfsec SARIF file for the ${{ inputs.type }}
+      - name: Upload the trivy SARIF file for the ${{ inputs.type }}
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: ${{ inputs.working-directory }}/tfsec.sarif.json
-          category: tfsec-${{ inputs.type }}
+          sarif_file: ${{ inputs.working-directory }}/trivy-results.sarif
+          category: trivy-${{ inputs.type }}
