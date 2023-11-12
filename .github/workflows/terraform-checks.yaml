@@ -40,8 +40,6 @@ jobs:
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Checkout the workflows-reusable-terraform repository
         uses: actions/checkout@v4
@@ -201,5 +199,5 @@ jobs:
       - name: Upload the trivy SARIF file for the ${{ inputs.type }}
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: ${{ inputs.working-directory }}/trivy-results.sarif
+          sarif_file: trivy-results.sarif
           category: trivy-${{ inputs.type }}
