@@ -40,6 +40,8 @@ jobs:
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Checkout the workflows-reusable-terraform repository
         uses: actions/checkout@v4
@@ -181,8 +183,13 @@ jobs:
         with:
           working-dir: ${{ inputs.working-directory }}
           # This needs to point to the location inside the container, not inside
-          # the repository, or on the agent
+          # the repository, or on the agent, so override it here
           config-file: /github/workspace/.terraform-docs.yaml
+          # This Action overrides a number of settings used in the configuration
+          # file with default versions via the command line arguments, so set
+          # these to be empty to use the .terraform-docs.yaml file instead
+          output-method: ""
+          template: ""
           git-push: true
           git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
 
