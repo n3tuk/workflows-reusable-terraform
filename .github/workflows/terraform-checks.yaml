@@ -4,24 +4,27 @@ name: Terraform Checks
 on:
   workflow_call:
     inputs:
-      # workflow-branch is used to choose the correct workflow repository branch
+      # workflow-branch is used to choose the correct workflow repository
+      # branch, usually for testing when anything other than main is required
       workflow-branch:
         default: main
         type: string
         required: false
-      # name defines the name of the GitHub Workflow Job to make it easier in
-      # the User Interface to see which Check relates to which aspect of the
-      # Module (as by default all 3+ checks are called the same thing otherwise)
+      # name defines the name to be used as part of each GitHub Workflow Job to
+      # make it easier in to see which Jobs relates to which aspect of the
+      # Terraform code being processed (otherwise all jobs will be called the
+      # same thing as the parent calling jobs are not included in the name other
+      # than in the Pull Request itself) and must be provided
       name:
         type: string
         required: true
-      # type defines the "type" of Terraform code being tested - configuration,
-      # example, module, or submodule
+      # type defines the "type" of Terraform code being tested - "configuration",
+      # "example", "module", or "submodule" - and must be provided
       type:
         type: string
         required: true
       # working-directory is the location of the configuration, example, module,
-      # or submodule, being checked
+      # or submodule, being checked, and must be provided
       working-directory:
         type: string
         required: true
@@ -33,15 +36,13 @@ defaults:
     shell: bash --noprofile --norc -eo pipefail {0}
 
 jobs:
-  terraform-checks:
-    name: Check ${{ inputs.name }}
+  terraform-validate:
+    name: Validate ${{ inputs.name }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout the repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Checkout the workflows-reusable-terraform repository
         uses: actions/checkout@v4
@@ -61,6 +62,13 @@ jobs:
         #   https://github.com/actions/checkout/issues/197
         run: mv workflows-reusable-terraform ..
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ../workflows-reusable-terraform/tools/go.mod
+          cache-dependency-path: ../workflows-reusable-terraform/tools/go.sum
+          cache: true
+
       - name: Read the current Terraform version
         uses: actions/github-script@v7
         id: version
@@ -75,13 +83,12 @@ jobs:
         run: |
           echo 'plugin_cache_dir="$HOME/.terraform.d/plugin-cache"' > ~/.terraformrc
           mkdir -p $HOME/.terraform.d/plugin-cache
-          mkdir -p $HOME/.tflint.d/plugins
 
       - name: Cache the Terraform providers
         uses: actions/cache@v4
         with:
           path: ~/.terraform.d/plugin-cache
-          key: terraform-${{ runner.os }}-${{ hashFiles('**/terraform.tf') }}
+          key: terraform-${{ runner.os }}-${{ hashFiles('${{ inputs.working-directory }}/terraform.tf') }}
 
       - name: Setup the Terraform environment with v${{ steps.version.outputs.version }}
         uses: hashicorp/setup-terraform@v3
@@ -151,6 +158,20 @@ jobs:
               }
             })
 
+  terraform-lint:
+    name: Lint ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-validate
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Prepare the cache directories
+        run: |
+          mkdir -p $HOME/.tflint.d/plugins
+
       - name: Cache the tflint plugins directory
         uses: actions/cache@v4
         with:
@@ -165,33 +186,31 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Initilise tflint
+        # Set the GITHUB_TOKEN variable to bypass the rate limit of 60 requests
+        # per hour as we source addresses are reusable by other Workflows
         env:
-          # Set this to bypass the rate limit of 60 requests per hour
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tflint --init \
             --config=${{ github.workspace }}/.tflint.hcl
 
       - name: Run tflint against the ${{ inputs.type }}
+        # Make sure that compact formatting is set at run time so the pattern
+        # matchers within the tflint wrapper can process for GitHub annotations
         run: |
           tflint --format compact \
             --config=${{ github.workspace }}/.tflint.hcl
         working-directory: ${{ inputs.working-directory }}
 
-      - name: Run terraform-docs against the ${{ inputs.type }}
-        uses: terraform-docs/gh-actions@v1
-        with:
-          working-dir: ${{ inputs.working-directory }}
-          # This needs to point to the location inside the container, not inside
-          # the repository, or on the agent, so override it here
-          config-file: /github/workspace/.terraform-docs.yaml
-          # This Action overrides a number of settings used in the configuration
-          # file with default versions via the command line arguments, so set
-          # these to be empty to use the .terraform-docs.yaml file instead
-          output-method: ""
-          template: ""
-          git-push: true
-          git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
+  terraform-analyse:
+    name: Analyse ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-validate
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
 
       - name: Run trivy against the ${{ inputs.type }}
         uses: aquasecurity/trivy-action@master
@@ -208,3 +227,32 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-${{ inputs.type }}
+
+  terraform-docs:
+    name: Document ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    needs:
+      - terraform-validate
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+        # Ensure set the checkout to target the reference for the branch we are
+        # testing against so that we can commit and pushed back to the branch
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Run terraform-docs against the ${{ inputs.type }}
+        uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: ${{ inputs.working-directory }}
+          # This needs to point to the location inside the container, not inside
+          # the repository, or on the agent, so override it here
+          config-file: /github/workspace/.terraform-docs.yaml
+          # This Action overrides a number of settings used in the configuration
+          # file with default versions via the command line arguments, so set
+          # these to be empty to use the .terraform-docs.yaml file instead
+          output-method: ""
+          template: ""
+          git-push: true
+          git-commit-message: Syncing terraform-docs update for ${{ inputs.working-directory }}/README.md
