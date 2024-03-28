@@ -142,7 +142,7 @@ jobs:
 
       - name: Publish the TerraTest summary
         id: junit-summary
-        uses: phoenix-actions/test-reporting@v12
+        uses: phoenix-actions/test-reporting@v13
         if: always()
         with:
           name: TerraTest Summary
@@ -153,7 +153,7 @@ jobs:
 
       - name: Publish the TerraTest results
         id: junit-report
-        uses: phoenix-actions/test-reporting@v12
+        uses: phoenix-actions/test-reporting@v13
         if: always()
         with:
           name: Terraform CI / Testing / TerraTest Results
