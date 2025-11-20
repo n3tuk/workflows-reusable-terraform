@@ -39,12 +39,12 @@ jobs:
 
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Checkout the workflows-reusable-terraform repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: n3tuk/workflows-reusable-terraform
           # Checkout this repository outside of the local repository being
