@@ -169,14 +169,14 @@ jobs:
           echo "See the full TerraTest Results Report at [GitHub Actions / Terraform CI / Testing / TerraTest Results](${{ steps.junit-report.outputs.runHtmlUrl }})" >> $GITHUB_STEP_SUMMARY
 
       - name: Save the TerraTest logs and reports as an artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: TerraTest Logs and Reports
           path: ${{ steps.logs.outputs.dir }}
 
       - name: Save the Terraform states as an artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: Terraform State Files
