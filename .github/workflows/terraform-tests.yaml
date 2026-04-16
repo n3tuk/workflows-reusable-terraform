@@ -56,7 +56,7 @@ jobs:
         run: mv workflows-reusable-terraform ..
 
       - name: Read the current Terraform version
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         id: version
         with:
           script: >
